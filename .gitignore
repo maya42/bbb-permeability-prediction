@@ -1,0 +1,16 @@
+# Local virtual environment
+mol-ml-env/
+
+# Exploratory / development notebook
+01_data_exploration.ipynb
+data/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+
+# macOS
+.DS_Store
+
+# Jupyter temporary files
+.ipynb_checkpoints/
