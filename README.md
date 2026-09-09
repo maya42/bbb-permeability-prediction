@@ -1,85 +1,129 @@
 # Blood-Brain Barrier Permeability Prediction
 
-Machine learning pipeline for predicting whether small molecules cross the blood-brain barrier (BBB) from molecular structure.
+An independent molecular machine learning project using public MoleculeNet
+BBBP data to predict blood-brain barrier penetration from molecular structure.
 
-This project uses molecular fingerprints and physicochemical descriptors to compare multiple classification approaches. Molecules are separated using Bemis-Murcko scaffolds rather than a conventional random split to provide a more challenging evaluation of generalization to structurally distinct compounds.
+## Research question
 
-## Results
+Do RDKit physicochemical descriptors improve predictions beyond ECFP4
+fingerprints under fixed LightGBM settings?
 
-| Model | Features | ROC-AUC | PR-AUC |
-|---|---|---:|---:|
-| Logistic Regression | ECFP4 | 0.835 | 0.940 |
-| Random Forest | ECFP4 | 0.889 | 0.963 |
-| LightGBM | ECFP4 + RDKit descriptors | **0.901** | **0.971** |
+The project benchmarks several classifiers, then compares three molecular
+representations using five-fold scaffold-grouped cross-validation.
 
-Metrics are reported on a held-out 20% scaffold-based test set.
+## Dataset and molecular features
 
-## Dataset
+The MoleculeNet BBBP benchmark contains SMILES strings with binary
+BBB penetration labels. After RDKit parsing, **2,039 molecules** were
+retained. BBB-penetrant molecules represent the majority class.
 
-The project uses the MoleculeNet BBBP (Blood-Brain Barrier Penetration) benchmark, containing molecular structures represented as SMILES strings with binary BBB permeability labels.
+Two feature representations are used:
 
-After molecular parsing with RDKit, **2,039 molecules** were retained for modeling.
+- **ECFP4 fingerprints:** 1,024-bit Morgan fingerprints with radius 2.
+- **RDKit descriptors:** 210 physicochemical and structural descriptors
+  in the recorded run.
 
-The dataset is class-imbalanced, with BBB-penetrant molecules representing the majority class.
+Dataset: [MoleculeNet BBBP CSV](https://deepchemdata.s3-us-west-1.amazonaws.com/datasets/BBBP.csv)
 
-## Molecular Representation
+## Evaluation procedure
 
-Two representations are used:
+Molecules are grouped by Bemis–Murcko scaffold so that molecules sharing
+a scaffold remain in the same partition.
 
-- **ECFP4 fingerprints** — 1,024-bit Morgan fingerprints encoding local molecular substructures
-- **RDKit descriptors** — 200+ physicochemical and structural molecular properties
-
-Logistic regression and random forest models use the ECFP4 representation as baselines.
-
-The final LightGBM model combines the fingerprints with RDKit descriptors.
-
-## Scaffold-Based Evaluation
-
-A random molecular split can place structurally similar compounds in both the training and test sets.
-
-To reduce this structural overlap, molecules are grouped using their **Bemis-Murcko scaffolds**, and complete scaffold families are assigned to either training or testing.
-
-Final split:
+The original split contains:
 
 - **1,631 training molecules**
 - **408 test molecules**
-- **No scaffold families shared between training and test sets**
+- **Zero shared scaffolds between training and test sets**
 
-This provides a more challenging estimate of performance on structurally distinct molecules.
+The feature comparison uses five-fold `StratifiedGroupKFold` within the
+original training set, with `shuffle=True` and `random_state=42`.
+Scaffold groups remain intact; class balance is approximate.
+The original test molecules are excluded from cross-validation.
 
-## Modeling
+All three LightGBM feature configurations use identical folds and settings:
 
-Three models are compared:
+- 300 boosting trees
+- Learning rate: 0.03
+- Maximum depth: 6
+- Random seed: 42
+- One training thread
 
-1. **Logistic Regression** — linear ECFP4 baseline
-2. **Random Forest** — nonlinear ECFP4 baseline
-3. **LightGBM** — gradient-boosted trees using ECFP4 fingerprints and RDKit molecular descriptors
+Descriptor scaling is fitted separately on each fold's training portion.
+The negative-to-positive class-weight ratio is also calculated from that
+portion only.
 
-The final LightGBM model achieved a held-out **ROC-AUC of 0.901** and **PR-AUC of 0.971**.
+## Cross-validation results
 
-The complete modeling workflow is available in [`bbbp_modeling_notebook.ipynb`](bbbp_modeling_notebook.ipynb).
+Values are **mean ± sample standard deviation** across five validation
+folds, rounded to three decimal places. AP denotes average precision.
 
-## Running the Predictor
+| LightGBM features | ROC-AUC | AP |
+|---|---:|---:|
+| ECFP4 fingerprints only | 0.864 ± 0.048 | 0.945 ± 0.021 |
+| RDKit descriptors only | 0.893 ± 0.018 | 0.955 ± 0.012 |
+| Fingerprints + descriptors | **0.899 ± 0.024** | **0.957 ± 0.013** |
 
-The trained LightGBM model and descriptor scaler are included in the repository:
+Adding descriptors to fingerprints improved ROC-AUC in four of five
+folds, with an average increase of approximately **0.035**.
 
-```text
-bbb_lightgbm_model.pkl
-bbb_descriptor_scaler.pkl
-```
+Descriptors alone performed nearly as well as the combined representation.
+Adding fingerprints to descriptors increased average ROC-AUC by
+approximately **0.006**.
 
-Create and activate a virtual environment:
+Under these fixed settings, descriptors contributed useful predictive
+information beyond fingerprints. Combined features had the highest
+average scores but did not outperform both alternatives in every fold.
+
+## Original single-split results
+
+The initial workflow compared logistic regression, random forest, and
+combined-feature LightGBM on the original scaffold test set.
+
+| Model | Features | ROC-AUC | AP |
+|---|---|---:|---:|
+| Logistic regression | ECFP4 | 0.835 | 0.940 |
+| Random forest | ECFP4 | 0.889 | 0.963 |
+| LightGBM | ECFP4 + RDKit descriptors | 0.901 | 0.971 |
+
+These results represent a different evaluation procedure from the
+cross-validation comparison above. The original test set was previously
+inspected and is not a newly untouched evaluation set.
+
+The initial comparison changes both classifier and feature representation;
+the controlled LightGBM comparison isolates the feature choice.
+
+## Running the notebook
+
+Create and activate a virtual environment on macOS/Linux:
 
 ```bash
 python3 -m venv mol-ml-env
 source mol-ml-env/bin/activate
+python -m pip install -r requirements.txt
 ```
 
-Install the required packages:
+Open [`bbbp_modeling_notebook.ipynb`](bbbp_modeling_notebook.ipynb)
+in a notebook editor, select the environment, and run the cells in order.
 
-```bash
-pip install -r requirements.txt
-```
+The notebook includes:
+
+1. Data loading and molecular featurization
+2. The original scaffold split and classifier benchmarks
+3. Fifteen cross-validation fits: three feature configurations across five folds
+4. Per-fold metrics, summary statistics, and paired ROC-AUC differences
+5. Feature importance and training-set Morgan-bit associations
+6. An example molecule-screening utility
+
+Section 5b prints progress during cross-validation and produces
+`cv_results`, `cv_summary`, and `paired_auc`.
+
+Internet access is required to download the dataset.
+
+## Running the predictor
+
+The standalone predictor uses the repository's saved LightGBM model and
+descriptor scaler.
 
 Run the default example:
 
@@ -87,42 +131,53 @@ Run the default example:
 python predict.py
 ```
 
-Or provide a molecule as a SMILES string:
+Or supply a SMILES string:
 
 ```bash
 python predict.py "CN1C=NC2=C1C(=O)N(C(=O)N2C)C"
 ```
 
-The script reports the model's predicted BBB penetration probability and selected molecular properties such as TPSA, MolLogP, and hydrogen-bond donors.
+The script reports a model-estimated BBB penetration probability and
+selected molecular properties, including TPSA, MolLogP, and
+hydrogen-bond donors.
 
-## Repository Structure
+## Repository files
 
-```text
-bbb-prediction/
-├── bbbp_modeling_notebook.ipynb  # Final modeling workflow
-├── bbb_lightgbm_model.pkl         # Trained LightGBM classifier
-├── bbb_descriptor_scaler.pkl      # Fitted descriptor scaler
-├── predict.py                     # Command-line inference script
-├── requirements.txt               # Python dependencies
-├── .gitignore
-└── README.md
-```
-
-Local development files, including the virtual environment and exploratory notebook, are excluded from version control.
-
-## Tech Stack
-
-**Python · RDKit · scikit-learn · LightGBM · NumPy · pandas · Matplotlib**
+| File | Purpose |
+|---|---|
+| `bbbp_modeling_notebook.ipynb` | Modeling, evaluation, and interpretation |
+| `bbb_lightgbm_model.pkl` | Saved LightGBM classifier |
+| `bbb_descriptor_scaler.pkl` | Saved descriptor scaler |
+| `predict.py` | Command-line prediction utility |
+| `requirements.txt` | Python dependencies |
+| `README.md` | Project overview and instructions |
 
 ## Limitations
 
-- BBBP is a relatively small and class-imbalanced molecular dataset.
-- Reported performance is based on one fixed scaffold-based train/test split rather than repeated scaffold cross-validation.
-- Molecular fingerprints are hashed representations and should not be interpreted as causal chemical explanations.
-- Predicted probabilities are computational model estimates, not experimental measurements of BBB permeability.
+- BBBP is a small dataset imbalanced toward BBB-penetrant molecules.
+- Cross-validation uses one five-fold scaffold partition. Additional
+  partitions and external validation would help assess robustness.
+- Fold standard deviations describe variability, not confidence
+  intervals. Observed differences do not establish statistical significance.
+- Class prevalence varies across folds and should be considered when
+  interpreting AP.
+- Scaffold separation prevents shared scaffold groups but does not
+  establish generalization across all chemical space.
+- Feature importance and hashed Morgan-bit associations are not evidence
+  of causal molecular effects.
+- Prediction scores are computational estimates, not experimentally
+  validated measurements of BBB permeability.
 
 ## Reproducibility
 
-The final notebook contains the full workflow from molecular parsing and featurization through scaffold splitting, model training, evaluation, and interpretation.
+Split and model random seeds are fixed at 42. Cross-validation fits
+preprocessing separately within each training fold.
 
-The serialized LightGBM model and fitted descriptor scaler are provided for standalone inference through `predict.py`.
+Reproducing the recorded results also requires consistent data and package
+versions. RDKit versions can affect the available descriptor set.
+The standalone predictor must use the same feature definitions and
+descriptor ordering as its saved model and scaler.
+
+## Tech stack
+
+Python · RDKit · scikit-learn · LightGBM · NumPy · pandas · Matplotlib
